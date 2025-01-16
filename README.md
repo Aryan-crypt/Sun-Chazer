@@ -297,28 +297,47 @@ void initialisever() {
   }
 }
 
-void updateServoPosition(Servo& servo, int& currentAngle, int targetAngle, bool& moving) {
-  if (currentAngle < targetAngle) {
-    currentAngle++;
-  } else if (currentAngle > targetAngle) {
-    currentAngle--;
+// Function to smoothly update the servo position (adjusted for precision)
+void updateServoPosition(Servo &servo, int &currentAngle, int targetAngle, bool &movingFlag) {
+  unsigned long currentTime = millis();
+
+  // Check if it's time to move the servo
+  if (currentTime - lastUpdateTime >= servoSpeed) {
+    lastUpdateTime = currentTime;
+
+    if (currentAngle < targetAngle) {
+      currentAngle++;
+      servo.write(currentAngle);
+    } else if (currentAngle > targetAngle) {
+      currentAngle--;
+      servo.write(currentAngle);
+    } else {
+      movingFlag = false;  // Stop moving if we reached the target
+    }
   }
-
-  servo.write(currentAngle);
-  delay(servoSpeed);  // Delay for smooth movement
 }
 
-void stopMotor() {
-  digitalWrite(RELAY1_PIN, LOW);
-  digitalWrite(RELAY2_PIN, LOW);
-}
-
+// Motor control functions
 void forwardMotor() {
   digitalWrite(RELAY1_PIN, HIGH);
   digitalWrite(RELAY2_PIN, LOW);
+  pinMode(RELAY1_PIN, OUTPUT);
+  pinMode(RELAY2_PIN, INPUT);
+  Serial.println("Relay 1 ON, Relay 2 OFF");
 }
 
 void reverseMotor() {
   digitalWrite(RELAY1_PIN, LOW);
   digitalWrite(RELAY2_PIN, HIGH);
+  pinMode(RELAY1_PIN, INPUT);
+  pinMode(RELAY2_PIN, OUTPUT);
+  Serial.println("Relay 1 OFF, Relay 2 ON");
+}
+
+void stopMotor() {
+  digitalWrite(RELAY1_PIN, LOW);
+  digitalWrite(RELAY2_PIN, LOW);
+  pinMode(RELAY1_PIN, INPUT);
+  pinMode(RELAY2_PIN, INPUT);
+  Serial.println("Both Relays OFF");
 }
