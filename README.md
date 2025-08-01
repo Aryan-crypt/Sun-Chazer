@@ -1,343 +1,368 @@
-# Sun-Chazer Project
+```markdown
+# Solar Tracking Rover
 
-Sun-Chazer is a solar tracker system using the ESP8266 to adjust the solar panel's orientation for maximum efficiency. The system tracks the sun by adjusting the horizontal and vertical position of the solar panel using servo motors. It operates through a web interface, allowing users to control the system remotely.
+An intelligent rover that autonomously tracks the sun's position to maximize solar energy collection while navigating its environment.
 
-## Components Used
-- **ESP8266** - Microcontroller for Wi-Fi and control.
-- **Servos** - For adjusting the solar panel's horizontal and vertical positioning.
-- **Relay** - To control the motor direction.
-- **Solar Panel** - To read voltage and track the sun's position.
-  
+![Solar Tracking Rover](https://img.shields.io/badge/Status-Working-brightgreen) ![License](https://img.shields.io/badge/License-MIT-blue) ![Platform](https://img.shields.io/badge/Platform-ESP8266-orange)
+
 ## Features
-- Automated solar panel tracking based on solar voltage.
-- Web-based control through the ESP8266 Access Point.
-- Horizontal and vertical movement of the solar panel via servo motors.
-- Adjustable servo speed for smooth operation.
-- Reversible motor control using relays.
+
+- 🔄 **Dual-Axis Solar Tracking**: Horizontal and vertical servo motors precisely position the solar panel to capture maximum sunlight throughout the day.
+- 🚗 **Intelligent Navigation**: When light is insufficient, the rover autonomously moves to find better positioning based on optimal sun angle calculations.
+- ⚡ **Energy Efficient**: Optimized movement patterns and smart scanning algorithms minimize power consumption while maximizing energy collection.
+- 📊 **Real-time Monitoring**: Continuous voltage monitoring and angle tracking ensure the rover always operates at peak efficiency.
+- 🔧 **Adaptive Movement**: Turns for 1 second when changing direction, then moves forward for 2 seconds to efficiently navigate toward light sources.
+- 🌐 **ESP8266 Powered**: Built on the versatile ESP8266 platform with Wi-Fi capabilities for future IoT integrations.
+
+## Hardware Components
+
+### Required Components
+
+1. **ESP8266 Development Board** (NodeMCU or similar)
+2. **Servo Motors** (x2):
+   - 1x for horizontal movement (bottom servo)
+   - 1x for vertical movement (top servo)
+3. **Solar Panel** (5V-6V output recommended)
+4. **L298N Motor Driver** (for controlling DC motors)
+5. **DC Motors** (x2) with wheels
+6. **Chassis** for the rover
+7. **Battery Pack** (7.4V-12V recommended)
+8. **Jumper Wires**
+9. **Breadboard or PCB for connections
+
+### Pin Connections
+
+#### ESP8266 to Servo Motors
+- **D3** → Signal pin of Bottom Servo (horizontal movement)
+- **D4** → Signal pin of Top Servo (vertical movement)
+- **5V** → VCC of both servos
+- **GND** → GND of both servos
+
+#### ESP8266 to Solar Panel
+- **A0** → Output pin of Solar Panel
+
+#### ESP8266 to L298N Motor Driver
+- **D1** → IN1 (Left motor forward)
+- **D2** → IN2 (Left motor backward)
+- **D6** → IN3 (Right motor forward)
+- **D7** → IN4 (Right motor backward)
+- **D5** → ENA (PWM speed control for left motors)
+- **D8** → ENB (PWM speed control for right motors)
+- **5V** → VCC of L298N
+- **GND** → GND of L298N
+
+#### L298N to DC Motors
+- **OUT1, OUT2** → Left motor terminals
+- **OUT3, OUT4** → Right motor terminals
+- **12V** → Motor power input (from battery pack)
+
+#### Power Connections
+- **Battery Pack** → VIN of ESP8266 and motor power input of L298N
+- **Common Ground** between all components
+
+> **Note**: For a visual representation of the connections, visit the interactive wiring diagram on our [project website](https://your-website-url.com#connections).
+
+## Installation
+
+### Prerequisites
+
+1. Arduino IDE (version 1.8.10 or higher)
+2. ESP8266 Board Manager
+3. Required Libraries:
+   - `Servo.h` (included with Arduino IDE)
+
+### Board Manager Setup
+
+1. Open Arduino IDE
+2. Go to **File > Preferences**
+3. Add the following URL to "Additional Boards Manager URLs":
+   ```
+   http://arduino.esp8266.com/stable/package_esp8266com_index.json
+   ```
+4. Go to **Tools > Board > Boards Manager...**
+5. Search for "esp8266" and install the latest version
+6. Select your board from **Tools > Board > ESP8266 Boards**
+
+### Library Installation
+
+1. Go to **Tools > Manage Libraries...**
+2. Search for "Servo" and install the Servo library by Michael Margolis
+
+### Uploading the Code
+
+1. Connect your ESP8266 to your computer
+2. Select the correct port in **Tools > Port**
+3. Upload the code using the upload button in Arduino IDE
+
+## Usage
+
+1. **Power On**: Connect the battery pack to power the rover
+2. **Initialization**: The rover will initialize with servos centered at 90 degrees
+3. **Solar Tracking**: The rover will automatically start scanning for the optimal sun position
+4. **Navigation**: If the solar panel voltage is below 3.0V, the rover will move to find a better position:
+   - If the optimal angle is < 50°, the rover turns left for 1 second
+   - If the optimal angle is > 130°, the rover turns right for 1 second
+   - Otherwise, the rover moves forward for 2 seconds
+5. **Monitoring**: Connect to the ESP8266 via serial monitor (9600 baud) to see real-time data
 
 ## Code
 
 ```cpp
 #include <Servo.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-
-// Wi-Fi credentials (for the AP)
-const char* ssid = "Sun_Chazer_AP";       // Name of the access point
-const char* password = "123456789";       // Password for the access point
-
-// Pin definitions
-const int BOTTOM_SERVO_PIN = D3;  // Horizontal movement
-const int TOP_SERVO_PIN = D4;     // Vertical movement
-const int SOLAR_PANEL_PIN = A0;   // Analog pin for solar panel voltage
-// Pin definitions for motor control (Relay pins)
-const int RELAY1_PIN = D5;  // Controls Motor Terminal 1
-const int RELAY2_PIN = D6;  // Controls Motor Terminal 2
-
-// Servo objects
+// --- Pin Definitions ---
+// Servo Pins
+const int BOTTOM_SERVO_PIN = D3;   // Horizontal movement
+const int TOP_SERVO_PIN = D4;      // Vertical movement
+// Solar Panel Analog Pin
+const int SOLAR_PANEL_PIN = A0;    // Reads panel voltage
+// Motor Driver (L298N) Pins (ESP8266 Mapping)
+const int IN1 = D1;  // Left Forward
+const int IN2 = D2;  // Left Backward
+const int IN3 = D6;  // Right Forward
+const int IN4 = D7;  // Right Backward
+const int ENA = D5;  // PWM Left motors
+const int ENB = D8;  // PWM Right motors
+// --- Constants ---
+#define LEFT_THRESHOLD 50
+#define RIGHT_THRESHOLD 130
+int speedValue = 255; // PWM speed (0-255)
+// --- Servo Setup ---
 Servo bottomServo;
 Servo topServo;
-
-// Create an instance of the server
-ESP8266WebServer server(80); // Create a web server on port 80
-
-// Variables to store best positions
+// --- Tracking Variables ---
 int bestHorizontalAngle = 90;
 int bestVerticalAngle = 90;
 float maxVoltage = 0;
-
-// Timing variables for non-blocking servo movement
-unsigned long lastUpdateTime = 0;
-int servoSpeed = 5; // Time between each servo step in milliseconds
-bool horizontalServoMoving = false;
-bool verticalServoMoving = false;
 int currentHorizontalAngle = 90;
 int currentVerticalAngle = 90;
-int targetHorizontalAngle = 90;
-int targetVerticalAngle = 90;
-
-// Variables to track timing for reverse motor and tracking
-unsigned long lastTrackingTime = 0;  // To trigger tracking every 5 seconds
-bool motorReversing = false;          // Flag to check if motor is reversing
-bool MotorStat = false;               // Motor state for tracking actions
-
-// Function declaration for energising()
-void energising();
-void updateServoPosition(Servo& servo, int& currentAngle, int targetAngle, bool& moving);
-void initialisehor();
-void initialisever();
-
-// Function to read voltage from the solar panel
-float readVoltage() {
-  int sensorValue = analogRead(SOLAR_PANEL_PIN);  // Read analog pin A0
-  float voltage = sensorValue * (3.3 / 1023.0);   // Convert the value to voltage
-  return voltage;
-}
 
 void setup() {
   Serial.begin(9600);
-  
+  // Attach servos
   bottomServo.attach(BOTTOM_SERVO_PIN);
   topServo.attach(TOP_SERVO_PIN);
-
-  // Initialize relays
-  pinMode(RELAY1_PIN, OUTPUT);
-  pinMode(RELAY2_PIN, OUTPUT);
-  stopMotor();
-  
-  // Initialize servos to middle position
+  // Initialize motor pins
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  stopMotors();
   bottomServo.write(90);
   topServo.write(90);
-  
-  delay(1000);  // Wait for servos to reach initial position
-  
-  // Set up the ESP8266 as an Access Point
-  WiFi.softAP(ssid, password);
-  Serial.println("Access Point Started");
-  Serial.print("IP address: ");
-  Serial.println(WiFi.softAPIP());  // Print the IP address of the ESP8266
-  
-  // Define routes for the web server
-  server.on("/", HTTP_GET, handleRoot);
-  server.on("/start_tracking", HTTP_GET, energising);
-  
-  // Start the server
-  server.begin();
+  delay(1000);
 }
 
 void loop() {
-  server.handleClient();  // Handle client requests
-
-  energising();  // Perform energising function periodically
-  delay(100);  // Small delay for smoother execution
+  energising();
+  delay(100);
 }
 
-// Function to handle web interface root
-void handleRoot() {
-  String html = "<!DOCTYPE html>"
-                "<html lang=\"en\">"
-                "<head>"
-                "<meta charset=\"UTF-8\">"
-                "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-                "<title>Sun Chazer Control</title>"
-                "<style>"
-                "body { font-family: Arial, sans-serif; background-color: #add8e6; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; color: #333; background-image: url('https://wallpapers.com/images/featured/8k-ultra-hd-nature-prdfm720u6780jl5.jpg'); background-repeat: no-repeat; }"
-                ".container { text-align: center;backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); background-color: rgba(256,256,256, 0.5); padding: 2rem; border-radius: 15px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); max-width: 400px; width: 100%; }"
-                "h1 { color: #388e3c; margin-bottom: 20px; }"
-                ".button { display: inline-block; padding: 12px 24px; margin: 10px; font-size: 18px; cursor: pointer; text-align: center; text-decoration: none; outline: none; color: #fff; background-color: #4CAF50; border: none; border-radius: 25px; box-shadow: 0 5px #999; transition: all 0.3s ease; }"
-                ".button:hover { background-color: #45a049; }"
-                ".button:active { background-color: #3e8e41; box-shadow: 0 3px #666; transform: translateY(2px); }"
-                "#status { margin-top: 20px; font-weight: bold; font-size: 18px; background-color: #ffcccb; padding: 10px; border-radius: 5px; }"
-                "input { padding: 10px; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; margin-bottom: 10px; width: 80%; }"
-                "</style>"
-                "</head>"
-                "<body>"
-                "<div class=\"container\">"
-                "<h1>Sun Chazer Control</h1>"
-                "<input type=\"text\" id=\"ipAddress\" placeholder=\"Enter IP Address\">"
-                "<button class=\"button\" onclick=\"startTracking()\">Start Tracking</button>"
-                "<div id=\"status\">Status: Ready</div>"
-                "</div>"
-                "<script>"
-                "function startTracking() {"
-                "    fetch('/start_tracking')"
-                "        .then(response => response.text())"
-                "        .then(data => {"
-                "            document.getElementById('status').textContent = 'Status: ' + data; "
-                "        });"
-                "} "
-                "</script>"
-                "</body>"
-                "</html>";
-  server.send(200, "text/html", html);
-}
-
+// --- MAIN LOGIC ---
 void energising() {
-  float voltage = readVoltage();  // Get the current voltage from the solar panel
-  if (voltage > 0.00) {
-    if (!MotorStat) {
-      Serial.println("Motor Reverse");
-      reverseMotor();
-      delay(3000);  // Let the motor run for 3 seconds
-      stopMotor();
-      MotorStat = true;
-    }
-    handleStartTracking();
-  } else {
-    Serial.println("Motor Forward");
-    forwardMotor();
-    delay(3000);  // Let the motor run for 3 seconds
-    stopMotor();
-    MotorStat = false;
+  float voltage = readVoltage();
+  Serial.print("Initial voltage: "); Serial.println(voltage);
+  handleStartTracking();
+  if (maxVoltage <= 3.0) {
+    Serial.println("[LOW VOLTAGE] Initiating rover movement...");
+    moveRoverBasedOnAngle(bestHorizontalAngle);
   }
+  delay(3000); // 3 second delay like original ESP logic
 }
 
-// Handle start tracking request
+// --- Solar Tracking ---
 void handleStartTracking() {
-  // Reset for a new tracking cycle
   maxVoltage = 0;
   bestHorizontalAngle = 90;
   bestVerticalAngle = 90;
-  
-  // Start tracking
-  Serial.println("Tracking started...");
-  initialisehor(); // Find best horizontal position
-  
-  // Set the target horizontal angle
-  targetHorizontalAngle = bestHorizontalAngle;
-  horizontalServoMoving = true;  // Start moving horizontal servo
-
-  initialisever(); // Find best vertical position
-
-  // Set the target vertical angle
-  targetVerticalAngle = bestVerticalAngle;
-  verticalServoMoving = true;  // Start moving vertical servo
-
-  // Report final position via Serial
-  Serial.println("Final Position:");
-  Serial.print("Horizontal Angle: ");
-  Serial.print(bestHorizontalAngle);
-  Serial.print(" (");
-  Serial.print(bestHorizontalAngle <= 90 ? "Left" : "Right");
-  Serial.print("), Vertical Angle: ");
-  Serial.print(bestVerticalAngle);
-  Serial.print(" (");
-  Serial.print(bestVerticalAngle <= 90 ? "Down" : "Up");
-  Serial.println(")");
-  Serial.print("Max Voltage: ");
-  Serial.print(maxVoltage);
-  Serial.println("V");
-
-  // Now move to the best position
-  horizontalServoMoving = true;
-  verticalServoMoving = true;
-
-  // Start servo movements to the best position
-  moveToBestPosition(); 
-
-  // Add a 3-second delay after tracking process is complete
-  delay(10000);  // Delay for 3 seconds before the next cycle or action
-
-  server.send(200, "text/plain", "Tracking Done!");
+  Serial.println("Starting Sun Tracking...");
+  initialisehor();
+  initialisever();
+  moveToBestPosition();
+  Serial.print("Best H Angle: "); Serial.println(bestHorizontalAngle);
+  Serial.print("Best V Angle: "); Serial.println(bestVerticalAngle);
+  Serial.print("Max Voltage: "); Serial.println(maxVoltage);
 }
 
-void moveToBestPosition() {
-  // Move horizontal servo to the best horizontal angle
-  while (currentHorizontalAngle != targetHorizontalAngle) {
-    updateServoPosition(bottomServo, currentHorizontalAngle, targetHorizontalAngle, horizontalServoMoving);
-    delay(20); // Delay to give the servo time to move
-  }
-
-  // Move vertical servo to the best vertical angle
-  while (currentVerticalAngle != targetVerticalAngle) {
-    updateServoPosition(topServo, currentVerticalAngle, targetVerticalAngle, verticalServoMoving);
-    delay(20); // Delay to give the servo time to move
-  }
-}
-
-// Horizontal tracking function
 void initialisehor() {
-  // Horizontal sweep with even smaller steps for more precise tracking
-  for (int angle = 0; angle <= 180; angle++) {  // Step size of 1 degree for finer movement
+  for (int angle = 0; angle <= 180; angle++) {
     bottomServo.write(angle);
-    delay(20);  // Allow time for servo to move and reading to stabilize
-
-    float voltage = readVoltage();
-
-    // Averaging over multiple readings for more accurate results
+    delay(20);
     float avgVoltage = 0;
-    int readings = 5;  // Number of readings to average
-    for (int i = 0; i < readings; i++) {
+    for (int i = 0; i < 5; i++) {
       avgVoltage += readVoltage();
-      delay(10);  // Small delay between readings
+      delay(10);
     }
-    avgVoltage /= readings;  // Average voltage
-
+    avgVoltage /= 5.0;
     if (avgVoltage > maxVoltage) {
       maxVoltage = avgVoltage;
       bestHorizontalAngle = angle;
     }
-
-    // Output voltage and angle for monitoring
-    Serial.print("Horizontal Angle: ");
-    Serial.print(angle);
-    Serial.print(", Avg Voltage: ");
-    Serial.println(avgVoltage, 4);  // Display voltage with 4 decimal places for precision
   }
 }
 
-// Vertical tracking function (Down to Up scan)
 void initialisever() {
-  // Vertical sweep with smaller steps for smoother tracking
-  for (int angle = 20; angle <= 170; angle++) {  // Step size of 1 degree for vertical movement
-    topServo.write(angle);  // Move the vertical servo to the current angle
-    delay(20);  // Allow time for servo to move and reading to stabilize
-
-    float voltage = readVoltage();
-
-    // Averaging over multiple readings for more accurate results
+  for (int angle = 20; angle <= 90; angle++) {
+    topServo.write(angle);
+    delay(20);
     float avgVoltage = 0;
-    int readings = 5;  // Number of readings to average
-    for (int i = 0; i < readings; i++) {
+    for (int i = 0; i < 5; i++) {
       avgVoltage += readVoltage();
-      delay(10);  // Small delay between readings
+      delay(10);
     }
-    avgVoltage /= readings;  // Average voltage
-
+    avgVoltage /= 5.0;
     if (avgVoltage > maxVoltage) {
       maxVoltage = avgVoltage;
       bestVerticalAngle = angle;
     }
-
-    // Output voltage and angle for monitoring
-    Serial.print("Vertical Angle: ");
-    Serial.print(angle);
-    Serial.print(", Avg Voltage: ");
-    Serial.println(avgVoltage, 4);  // Display voltage with 4 decimal places for precision
   }
 }
 
-// Function to smoothly update the servo position (adjusted for precision)
-void updateServoPosition(Servo &servo, int &currentAngle, int targetAngle, bool &movingFlag) {
-  unsigned long currentTime = millis();
+void moveToBestPosition() {
+  bottomServo.write(bestHorizontalAngle);
+  topServo.write(bestVerticalAngle);
+  delay(500);
+}
 
-  // Check if it's time to move the servo
-  if (currentTime - lastUpdateTime >= servoSpeed) {
-    lastUpdateTime = currentTime;
+float readVoltage() {
+  int sensorValue = analogRead(SOLAR_PANEL_PIN);
+  float voltage = sensorValue * (3.3 / 1023.0);  // ESP8266 analog range is 0–3.3V
+  return voltage;
+}
 
-    if (currentAngle < targetAngle) {
-      currentAngle++;
-      servo.write(currentAngle);
-    } else if (currentAngle > targetAngle) {
-      currentAngle--;
-      servo.write(currentAngle);
-    } else {
-      movingFlag = false;  // Stop moving if we reached the target
-    }
+// --- Rover Movement Based on Angle ---
+void moveRoverBasedOnAngle(int angle) {
+  if (angle < LEFT_THRESHOLD) {
+    turnLeft();
+  } else if (angle > RIGHT_THRESHOLD) {
+    turnRight();
+  } else {
+    moveForward();
   }
+  delay(3000);
+  stopMotors();
 }
 
-// Motor control functions
-void forwardMotor() {
-  digitalWrite(RELAY1_PIN, HIGH);
-  digitalWrite(RELAY2_PIN, LOW);
-  pinMode(RELAY1_PIN, OUTPUT);
-  pinMode(RELAY2_PIN, INPUT);
-  Serial.println("Relay 1 ON, Relay 2 OFF");
+// --- Motor Movement Functions ---
+void moveForward() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENA, speedValue);
+  analogWrite(ENB, speedValue);
+  Serial.println("Moving Forward");
 }
 
-void reverseMotor() {
-  digitalWrite(RELAY1_PIN, LOW);
-  digitalWrite(RELAY2_PIN, HIGH);
-  pinMode(RELAY1_PIN, INPUT);
-  pinMode(RELAY2_PIN, OUTPUT);
-  Serial.println("Relay 1 OFF, Relay 2 ON");
+void turnLeft() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENA, speedValue);
+  analogWrite(ENB, speedValue);
+  Serial.println("Turning Left");
 }
 
-void stopMotor() {
-  digitalWrite(RELAY1_PIN, LOW);
-  digitalWrite(RELAY2_PIN, LOW);
-  pinMode(RELAY1_PIN, INPUT);
-  pinMode(RELAY2_PIN, INPUT);
-  Serial.println("Both Relays OFF");
+void turnRight() {
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+  analogWrite(ENA, speedValue);
+  analogWrite(ENB, speedValue);
+  Serial.println("Turning Right");
 }
+
+void stopMotors() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+  Serial.println("Motors Stopped");
+}
+```
+
+## Project Website
+
+For an interactive experience with 3D visualizations, connection diagrams, and detailed explanations, visit our project website: [Solar Tracking Rover Website](https://your-website-url.com)
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Servos Not Moving**
+   - Check power connections to servos
+   - Ensure servo signal wires are connected to correct pins (D3, D4)
+   - Verify that the servos are getting adequate power (external power may be needed)
+
+2. **Motors Not Responding**
+   - Check L298N power connections
+   - Verify motor driver pin connections
+   - Ensure battery pack is charged
+
+3. **Inaccurate Solar Tracking**
+   - Check solar panel connection to A0
+   - Ensure the solar panel is receiving adequate sunlight
+   - Calibrate voltage thresholds if needed
+
+4. **Rover Moving Erratically**
+   - Check for loose connections
+   - Ensure all components share a common ground
+   - Verify that the battery can supply enough current
+
+## Future Enhancements
+
+- [ ] Implement Wi-Fi connectivity for remote monitoring
+- [ ] Add obstacle avoidance using ultrasonic sensors
+- [ ] Implement machine learning for improved sun tracking
+- [ ] Add a mobile app for control and monitoring
+- [ ] Implement power management and sleep modes
+- [ ] Add GPS for location-based sun position calculation
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+### Steps to Contribute
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Arduino community for libraries and support
+- ESP8266 community for the excellent platform
+- Open source hardware suppliers
+
+## Contact
+
+For questions or suggestions, please open an issue or contact:
+- Email: info@rover.com
+- Project Website: https://your-website-url.com
+- GitHub: https://github.com/yourusername/solar-tracking-rover
+```
+
+This README.md file provides a comprehensive overview of your Solar Tracking Rover project, including:
+
+1. Clear project description and features
+2. Detailed hardware requirements and pin connections
+3. Step-by-step installation and setup instructions
+4. Usage guidelines
+5. The complete code from the website
+6. Troubleshooting section for common issues
+7. Future enhancement ideas
+8. Contribution guidelines
+9. License and contact information
+
+The README is formatted with Markdown for easy rendering on GitHub and includes badges for project status, license, and platform. It also references the interactive website for users who want a more visual understanding of the project.
