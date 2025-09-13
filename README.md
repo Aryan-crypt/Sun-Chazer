@@ -91,126 +91,169 @@ Formula used:
 ```cpp
 #include <Servo.h>
 
-Servo horizontal;
-Servo vertical;
+// --- Pin Definitions ---
+// Servo Pins
+const int BOTTOM_SERVO_PIN = D3;   // Horizontal movement
+const int TOP_SERVO_PIN = D4;      // Vertical movement
 
-const int servoH = 3;
-const int servoV = 4;
+// Solar Panel Analog Pin
+const int SOLAR_PANEL_PIN = A0;    // Reads panel voltage
 
-// Motor pins
-#define IN1 1
-#define IN2 2
-#define IN3 6
-#define IN4 7
+// Motor Driver (L298N) Pins (ESP8266 Mapping)
+const int IN1 = D1;  // Left Forward
+const int IN2 = D2;  // Left Backward
+const int IN3 = D6;  // Right Forward
+const int IN4 = D7;  // Right Backward
+const int ENA = D5;  // PWM Left motors
+const int ENB = D8;  // PWM Right motors
 
-// Relay pins for N20 motor
-#define RELAY1 5
-#define RELAY2 8
+// --- Constants ---
+#define LEFT_THRESHOLD 50
+#define RIGHT_THRESHOLD 130
+int speedValue = 255; // PWM speed (0-255)
 
-// Sensor pin
-#define SENSOR A0
+// --- Servo Setup ---
+Servo bottomServo;
+Servo topServo;
 
-int hMin = 0, hMax = 180;
-int vMin = 0, vMax = 90;
-int bestH = 90, bestV = 45;
+// --- Tracking Variables ---
+int bestHorizontalAngle = 90;
+int bestVerticalAngle = 90;
+float maxVoltage = 0;
 
-unsigned long lastScanTime = 0;
-const unsigned long scanInterval = 3000;
-
-bool flapsOpen = false;
+int currentHorizontalAngle = 90;
+int currentVerticalAngle = 90;
 
 void setup() {
   Serial.begin(9600);
-  horizontal.attach(servoH);
-  vertical.attach(servoV);
 
+  // Attach servos
+  bottomServo.attach(BOTTOM_SERVO_PIN);
+  topServo.attach(TOP_SERVO_PIN);
+
+  // Initialize motor pins
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
 
-  pinMode(RELAY1, OUTPUT);
-  pinMode(RELAY2, OUTPUT);
-
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
-
-  digitalWrite(RELAY1, LOW);
-  digitalWrite(RELAY2, LOW);
-
-  horizontal.write(bestH);
-  vertical.write(bestV);
+  stopMotors();
+  bottomServo.write(90);
+  topServo.write(90);
+  delay(1000);
 }
 
 void loop() {
-  float voltage = analogRead(SENSOR) * (5.0 / 1023.0);
+  energising();
+  delay(100);
+}
 
-  if (voltage < 0.6) {
-    if (flapsOpen) {
-      closeFlaps();
-      flapsOpen = false;
-    }
-    delay(500);
-    return;
-  } else {
-    if (!flapsOpen) {
-      openFlaps();
-      flapsOpen = true;
-    }
+// --- MAIN LOGIC ---
+void energising() {
+  float voltage = readVoltage();
+  Serial.print("Initial voltage: "); Serial.println(voltage);
+
+  handleStartTracking();
+
+  if (maxVoltage <= 3.0) {
+    Serial.println("[LOW VOLTAGE] Initiating rover movement...");
+    moveRoverBasedOnAngle(bestHorizontalAngle);
   }
 
-  if (millis() - lastScanTime >= scanInterval) {
-    scanSun();
-    lastScanTime = millis();
-    if (getVoltage(bestH, bestV) <= 1.5) {
-      moveRover();
+  delay(3000); // 3 second delay like original ESP logic
+}
+
+// --- Solar Tracking ---
+void handleStartTracking() {
+  maxVoltage = 0;
+  bestHorizontalAngle = 90;
+  bestVerticalAngle = 90;
+
+  Serial.println("Starting Sun Tracking...");
+  initialisehor();
+  initialisever();
+
+  moveToBestPosition();
+
+  Serial.print("Best H Angle: "); Serial.println(bestHorizontalAngle);
+  Serial.print("Best V Angle: "); Serial.println(bestVerticalAngle);
+  Serial.print("Max Voltage: "); Serial.println(maxVoltage);
+}
+
+void initialisehor() {
+  for (int angle = 0; angle <= 180; angle++) {
+    bottomServo.write(angle);
+    delay(20);
+
+    float avgVoltage = 0;
+    for (int i = 0; i < 5; i++) {
+      avgVoltage += readVoltage();
+      delay(10);
+    }
+    avgVoltage /= 5.0;
+
+    if (avgVoltage > maxVoltage) {
+      maxVoltage = avgVoltage;
+      bestHorizontalAngle = angle;
     }
   }
 }
 
-void scanSun() {
-  float maxVoltage = 0;
-  for (int h = hMin; h <= hMax; h += 30) {
-    horizontal.write(h);
-    delay(300);
-    for (int v = vMin; v <= vMax; v += 30) {
-      vertical.write(v);
-      delay(300);
-      float vVal = getVoltage(h, v);
-      if (vVal > maxVoltage) {
-        maxVoltage = vVal;
-        bestH = h;
-        bestV = v;
-      }
+void initialisever() {
+  for (int angle = 20; angle <= 90; angle++) {
+    topServo.write(angle);
+    delay(20);
+
+    float avgVoltage = 0;
+    for (int i = 0; i < 5; i++) {
+      avgVoltage += readVoltage();
+      delay(10);
+    }
+    avgVoltage /= 5.0;
+
+    if (avgVoltage > maxVoltage) {
+      maxVoltage = avgVoltage;
+      bestVerticalAngle = angle;
     }
   }
-  horizontal.write(bestH);
-  vertical.write(bestV);
 }
 
-float getVoltage(int h, int v) {
-  return analogRead(SENSOR) * (5.0 / 1023.0);
+void moveToBestPosition() {
+  bottomServo.write(bestHorizontalAngle);
+  topServo.write(bestVerticalAngle);
+  delay(500);
 }
 
-void moveRover() {
-  if (bestH < 60) {
+float readVoltage() {
+  int sensorValue = analogRead(SOLAR_PANEL_PIN);
+  float voltage = sensorValue * (3.3 / 1023.0);  // ESP8266 analog range is 0–3.3V
+  return voltage;
+}
+
+// --- Rover Movement Based on Angle ---
+void moveRoverBasedOnAngle(int angle) {
+  if (angle < LEFT_THRESHOLD) {
     turnLeft();
-  } else if (bestH > 120) {
+  } else if (angle > RIGHT_THRESHOLD) {
     turnRight();
   } else {
     moveForward();
   }
+  delay(3000);
+  stopMotors();
 }
 
+// --- Motor Movement Functions ---
 void moveForward() {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
-  delay(3000);
-  stopMotors();
+  analogWrite(ENA, speedValue);
+  analogWrite(ENB, speedValue);
+  Serial.println("Moving Forward");
 }
 
 void turnLeft() {
@@ -218,8 +261,9 @@ void turnLeft() {
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
-  delay(3000);
-  stopMotors();
+  analogWrite(ENA, speedValue);
+  analogWrite(ENB, speedValue);
+  Serial.println("Turning Left");
 }
 
 void turnRight() {
@@ -227,8 +271,9 @@ void turnRight() {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-  delay(3000);
-  stopMotors();
+  analogWrite(ENA, speedValue);
+  analogWrite(ENB, speedValue);
+  Serial.println("Turning Right");
 }
 
 void stopMotors() {
@@ -236,20 +281,7 @@ void stopMotors() {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
-}
-
-void openFlaps() {
-  digitalWrite(RELAY1, HIGH);
-  digitalWrite(RELAY2, LOW);
-  delay(2000);
-  digitalWrite(RELAY1, LOW);
-  digitalWrite(RELAY2, LOW);
-}
-
-void closeFlaps() {
-  digitalWrite(RELAY1, LOW);
-  digitalWrite(RELAY2, HIGH);
-  delay(2000);
-  digitalWrite(RELAY1, LOW);
-  digitalWrite(RELAY2, LOW);
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+  Serial.println("Motors Stopped");
 }
